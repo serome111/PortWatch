@@ -118,14 +118,14 @@ Usa PortWatch en tu propio equipo y con fines legítimos. La información de “
 
 chmod +x portwatch_make_suspicious.sh
 
-# 1) Minero local (puerto 3333 + beaconing + binario en /tmp)
+### 1) Minero local (puerto 3333 + beaconing + binario en /tmp)
 ./portwatch_make_suspicious.sh miner
 
-# 2) Beacon a IP pública (1.1.1.1:443)
+### 2) Beacon a IP pública (1.1.1.1:443)
 ./portwatch_make_suspicious.sh public
 
-# 3) “Spray” (varios hosts para subir unique_dsts y empujar a Alto)
+### 3) “Spray” (varios hosts para subir unique_dsts y empujar a Alto)
 ./portwatch_demo.sh spray
 
-# 4) Parar y limpiar
+### 4) Parar y limpiar
 ./portwatch_demo.sh stop
