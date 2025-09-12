@@ -10,6 +10,8 @@ import socket
 import ipaddress
 import subprocess
 import os
+import re
+import sys
 from collections import defaultdict, deque
 from typing import Dict, List, Tuple
 
@@ -34,6 +36,8 @@ TMP_HINTS = ("/tmp", "/private/tmp", "/var/tmp", "/dev/shm")
 HIST = defaultdict(lambda: deque(maxlen=200))
 WINDOW_SECONDS = 120
 SIGN_CACHE: Dict[str, Dict] = {}
+OWN_PID = os.getpid()
+PROTECT_SELF = os.getenv("PW_PROTECT_SELF", "1") != "0"
 
 
 app = FastAPI(title="PortWatch Web Panel")
@@ -55,6 +59,27 @@ def root():
 
 def _now():
     return time.time()
+
+
+def _is_macos() -> bool:
+    try:
+        return sys.platform == "darwin"
+    except Exception:
+        return False
+
+
+def _is_self_or_ancestor(pid: int) -> bool:
+    """True si el PID es este servidor o algún ancestro suyo (para protegernos)."""
+    try:
+        if pid == OWN_PID:
+            return True
+        me = psutil.Process(OWN_PID)
+        for pp in me.parents():
+            if pp.pid == pid:
+                return True
+        return False
+    except Exception:
+        return False
 
 
 def _beacon_flag(pid: int, dst_key: str, now_ts: float) -> bool:
@@ -696,6 +721,8 @@ def api_proc_stop(pid: int = Query(...)):
     """Envía SIGSTOP a un proceso (pausa su ejecución). Requiere permisos.
     """
     try:
+        if PROTECT_SELF and _is_self_or_ancestor(pid):
+            return JSONResponse({"ok": False, "pid": pid, "action": "stop", "error": "Protegido: proceso del propio servidor"}, status_code=403)
         os.kill(pid, signal.SIGSTOP)
         return JSONResponse({"ok": True, "pid": pid, "action": "stop"})
     except PermissionError as e:
@@ -711,6 +738,8 @@ def api_proc_kill(pid: int = Query(...)):
     """Envía SIGKILL a un proceso (terminación forzada). Requiere permisos.
     """
     try:
+        if PROTECT_SELF and _is_self_or_ancestor(pid):
+            return JSONResponse({"ok": False, "pid": pid, "action": "kill", "error": "Protegido: proceso del propio servidor"}, status_code=403)
         os.kill(pid, signal.SIGKILL)
         return JSONResponse({"ok": True, "pid": pid, "action": "kill"})
     except PermissionError as e:
@@ -725,6 +754,186 @@ def api_proc_kill(pid: int = Query(...)):
 def health():
     return {"ok": True, "ts": _now()}
 
+
+def _proc_tree_info(pid: int) -> Dict:
+    """Construye info de árbol de procesos y posible label de launchctl.
+    No mata nada; solo devuelve datos para decidir contención.
+    """
+    out: Dict[str, object] = {"pid": pid, "parents": [], "pgid": None, "children_count": 0}
+    try:
+        p = psutil.Process(pid)
+    except Exception:
+        out["error"] = "Proceso no encontrado"
+        return out
+    try:
+        out["pgid"] = os.getpgid(pid)
+    except Exception:
+        out["pgid"] = None
+
+    # Cadena de ancestros (pid, name)
+    parents = []
+    try:
+        for pp in [p] + p.parents():
+            try:
+                parents.append({
+                    "pid": pp.pid,
+                    "name": pp.name(),
+                    "username": pp.username() if hasattr(pp, 'username') else "",
+                })
+            except Exception:
+                parents.append({"pid": pp.pid, "name": "?", "username": ""})
+    except Exception:
+        pass
+    out["parents"] = parents
+
+    # Conteo de descendientes
+    try:
+        out["children_count"] = len(p.children(recursive=True))
+    except Exception:
+        out["children_count"] = 0
+
+    # launchctl label (solo macOS)
+    label = None
+    domain = None
+    plist_path = None
+    if _is_macos():
+        try:
+            proc = subprocess.run(["launchctl", "list"], capture_output=True, text=True)
+            if proc.returncode == 0:
+                for line in proc.stdout.splitlines():
+                    m = re.match(r"^\s*(\d+)\s+[-\d]+\s+(\S+)$", line.strip())
+                    if m and int(m.group(1)) == pid:
+                        label = m.group(2)
+                        break
+        except Exception:
+            pass
+        # Deducir dominio gui/<uid> por defecto
+        if label:
+            try:
+                uid = None
+                try:
+                    uid = psutil.Process(pid).uids().real  # type: ignore[attr-defined]
+                except Exception:
+                    uid = os.getuid()
+                domain = f"gui/{uid}"
+            except Exception:
+                domain = None
+            # Intentar obtener la ruta del plist
+            try:
+                if domain:
+                    pr = subprocess.run(["launchctl", "print", f"{domain}/{label}"], capture_output=True, text=True)
+                    text = (pr.stdout or "") + (pr.stderr or "")
+                    # Buscar claves comunes
+                    for ln in text.splitlines():
+                        if "path =" in ln:
+                            plist_path = ln.split("path =", 1)[1].strip()
+                            break
+                        if "Program =" in ln and not plist_path:
+                            plist_path = ln.split("Program =", 1)[1].strip()
+            except Exception:
+                pass
+    out["launchd"] = {"label": label, "domain": domain, "path": plist_path}
+    return out
+
+
+@app.get("/api/proc_tree")
+def api_proc_tree(pid: int = Query(...)):
+    return JSONResponse(_proc_tree_info(pid))
+
+
+@app.post("/api/proc_kill_tree")
+def api_proc_kill_tree(pid: int = Query(...)):
+    """Mata recursivamente el proceso y todos sus hijos (SIGKILL),
+    evitando matar al propio servidor si está protegido.
+    """
+    try:
+        if PROTECT_SELF and _is_self_or_ancestor(pid):
+            return JSONResponse({"ok": False, "pid": pid, "error": "Protegido: proceso del propio servidor"}, status_code=403)
+
+        target = psutil.Process(pid)
+        # Primero matar hijos recursivamente
+        children = target.children(recursive=True)
+        killed: List[int] = []
+        for ch in sorted(children, key=lambda c: len(c.parents()), reverse=True):
+            try:
+                if PROTECT_SELF and _is_self_or_ancestor(ch.pid):
+                    continue
+                os.kill(ch.pid, signal.SIGKILL)
+                killed.append(ch.pid)
+            except Exception:
+                pass
+        # Luego el proceso objetivo
+        try:
+            os.kill(pid, signal.SIGKILL)
+            killed.append(pid)
+        except Exception:
+            pass
+        return JSONResponse({"ok": True, "pid": pid, "killed": killed})
+    except ProcessLookupError:
+        return JSONResponse({"ok": False, "pid": pid, "error": "Proceso no encontrado"}, status_code=404)
+    except PermissionError as e:
+        return JSONResponse({"ok": False, "pid": pid, "error": f"Permiso denegado: {e}"}, status_code=403)
+    except Exception as e:
+        return JSONResponse({"ok": False, "pid": pid, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/proc_bootout")
+def api_proc_bootout(pid: int = Query(...)):
+    """Intenta descargar/deshabilitar el servicio launchctl asociado al PID (macOS).
+    Sin sudo: funciona para LaunchAgents de usuario. Devuelve salida de comandos.
+    """
+    if not _is_macos():
+        return JSONResponse({"ok": False, "error": "Solo disponible en macOS"}, status_code=400)
+    info = _proc_tree_info(pid)
+    label = (info.get("launchd") or {}).get("label")
+    domain = (info.get("launchd") or {}).get("domain")
+    if not label or not domain:
+        return JSONResponse({"ok": False, "error": "No se detectó label/domain de launchctl para el PID"}, status_code=404)
+    cmds = [
+        ["launchctl", "bootout", f"{domain}", label],
+        ["launchctl", "disable", f"{domain}/{label}"],
+        ["launchctl", "remove", label],
+    ]
+    results = []
+    for cmd in cmds:
+        try:
+            pr = subprocess.run(cmd, capture_output=True, text=True)
+            results.append({
+                "cmd": " ".join(cmd),
+                "rc": pr.returncode,
+                "stdout": pr.stdout,
+                "stderr": pr.stderr,
+            })
+        except Exception as e:
+            results.append({"cmd": " ".join(cmd), "error": str(e)})
+    return JSONResponse({"ok": True, "label": label, "domain": domain, "results": results})
+
+
+@app.post("/api/proc_kill_pgid")
+def api_proc_kill_pgid(pid: int = Query(...)):
+    """Mata a todos los procesos en el mismo process group del PID dado (SIGKILL).
+    Útil para scripts que relanzan hijos desde el mismo grupo.
+    """
+    try:
+        pgid = os.getpgid(pid)
+    except Exception as e:
+        return JSONResponse({"ok": False, "pid": pid, "error": f"No se pudo obtener PGID: {e}"}, status_code=400)
+    try:
+        # Proteger al propio servidor por grupo
+        try:
+            my_pgid = os.getpgid(OWN_PID)
+        except Exception:
+            my_pgid = None
+        if PROTECT_SELF and my_pgid is not None and pgid == my_pgid:
+            return JSONResponse({"ok": False, "pid": pid, "error": "Protegido: grupo del propio servidor"}, status_code=403)
+        os.killpg(pgid, signal.SIGKILL)
+        return JSONResponse({"ok": True, "pid": pid, "pgid": pgid, "action": "kill_pgid"})
+    except PermissionError as e:
+        return JSONResponse({"ok": False, "pid": pid, "pgid": pgid, "error": f"Permiso denegado: {e}"}, status_code=403)
+    except ProcessLookupError:
+        return JSONResponse({"ok": False, "pid": pid, "pgid": pgid, "error": "Grupo no encontrado"}, status_code=404)
+    except Exception as e:
+        return JSONResponse({"ok": False, "pid": pid, "pgid": pgid, "error": str(e)}, status_code=500)
 
 if __name__ == "__main__":
     # Ejecución directa: uvicorn server:app --reload

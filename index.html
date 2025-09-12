@@ -7,6 +7,30 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    /* Minimal fallback styles so dynamically injected KILL button looks like a button
+       even if Tailwind CDN hasn't generated the utility classes yet. */
+    #killInModal {
+      display: inline-block;
+      padding: 0.5rem 0.75rem; /* px-3 py-2 */
+      background: #991b1b;    /* red-800 */
+      color: #fff;
+      border-radius: 0.375rem; /* rounded */
+      border: 1px solid #7f1d1d; /* ring-red-900 */
+      text-decoration: none;
+      cursor: pointer;
+    }
+    #killInModal:hover { background: #b91c1c; } /* red-700 */
+    /* Same style for related action buttons */
+    #killTreeInModal, #bootoutInModal {
+      display: inline-block;
+      padding: 0.5rem 0.75rem;
+      background: #334155; /* slate-700 for alt */
+      color: #e2e8f0;
+      border-radius: 0.375rem;
+      border: 1px solid #1f2937;
+      cursor: pointer;
+    }
+    #killTreeInModal:hover, #bootoutInModal:hover { background: #475569; }
   </style>
   <link rel="icon" href="data:," />
   <meta name="color-scheme" content="dark light">
@@ -68,7 +92,10 @@
       </div>
     </header>
     <p id="meta" class="text-slate-400 text-sm mt-2">Cargando…</p>
-    <div id="hackAlert" class="hidden mt-3 p-3 rounded-lg bg-red-900 text-red-200 ring-1 ring-red-800 text-center text-lg font-semibold">¡HACKEADO!</div>
+    <div id="hackAlert" class="hidden mt-3 p-3 rounded-lg bg-red-900 text-red-200 ring-1 ring-red-800 flex items-center justify-between gap-3">
+      <div class="text-lg font-semibold">¡HACKEADO!</div>
+      <button id="hackResolve" class="px-2 py-1 text-xs bg-slate-900/40 hover:bg-slate-900/60 text-slate-200 rounded ring-1 ring-red-800">Resolver</button>
+    </div>
 
     <section class="mt-4 overflow-x-auto">
       <table class="w-full text-sm" id="table">
@@ -109,7 +136,7 @@
           <h2 id="modalTitle" class="text-lg font-semibold">Detalles</h2>
           <button id="modalClose" class="px-2 py-1 text-sm bg-slate-800 hover:bg-slate-700 rounded">Cerrar</button>
         </div>
-        <div id="modalBody" class="text-sm whitespace-pre-wrap"></div>
+        <div id="modalBody" class="text-sm"></div>
       </div>
     </div>
   </main>
@@ -629,13 +656,87 @@
     } catch(_){/* noop */}
   }
 
-  // Alerta global: muestra "¡HACKEADO!" si hay conexiones sospechosas
+  // Modal de confirmación amigable (promesa)
+  function askConfirm(message, { okText='Aceptar', cancelText='Cancelar', tone='danger' } = {}){
+    const okCls = (tone==='danger') ? 'bg-red-700 hover:bg-red-600 ring-red-900' : (tone==='warn' ? 'bg-yellow-700 hover:bg-yellow-600 ring-yellow-900' : 'bg-slate-700 hover:bg-slate-600 ring-slate-800');
+    const html = `
+      <div class="space-y-3">
+        <div>${String(message||'¿Confirmar?')}</div>
+        <div class="flex items-center gap-2 justify-end">
+          <button id="cfCancel" class="px-3 py-2 rounded bg-slate-800 hover:bg-slate-700 ring-1 ring-slate-700">${cancelText}</button>
+          <button id="cfOk" class="px-3 py-2 rounded text-white ring-1 ${okCls}">${okText}</button>
+        </div>
+      </div>`;
+    openModal('Confirmar acción', html);
+    return new Promise((resolve)=>{
+      setTimeout(()=>{
+        const ok = document.getElementById('cfOk');
+        const no = document.getElementById('cfCancel');
+        const off = ()=>{ try{ ok&&ok.removeEventListener('click', onOk); no&&no.removeEventListener('click', onNo); }catch(_){ } };
+        const onOk = ()=>{ off(); closeModal(); resolve(true); };
+        const onNo = ()=>{ off(); closeModal(); resolve(false); };
+        if(ok) ok.addEventListener('click', onOk);
+        if(no) no.addEventListener('click', onNo);
+      }, 0);
+    });
+  }
+
+  // Toasts ligeros para feedback de acciones (éxito/error)
+  function toast(msg, type='info', ms=3000){
+    try{
+      let host = document.getElementById('toasts');
+      if(!host){
+        host = document.createElement('div');
+        host.id = 'toasts';
+        host.className = 'fixed right-4 bottom-4 z-50 flex flex-col gap-2';
+        document.body.appendChild(host);
+      }
+      const el = document.createElement('div');
+      const base = 'px-3 py-2 rounded ring-1 shadow text-sm cursor-pointer';
+      const cls = type==='success' ? 'bg-emerald-800 text-emerald-50 ring-emerald-900' : (type==='error' ? 'bg-red-800 text-red-100 ring-red-900' : 'bg-slate-800 text-slate-100 ring-slate-700');
+      el.className = base + ' ' + cls;
+      el.textContent = String(msg||'');
+      el.title = 'Click para cerrar';
+      el.onclick = ()=>{ el.remove(); };
+      host.appendChild(el);
+      setTimeout(()=>{ try{ el.remove(); }catch(_){ } }, ms);
+    }catch(_){ /* noop */ }
+  }
+
+  // Alerta global: muestra "¡HACKEADO!" si hay conexiones sospechosas.
+  // Permite resolver (ocultar) hasta que aparezca una nueva firma de hallazgo.
+  function hackSig(rows){
+    try{
+      const items = (rows||[]).filter(r=>r && (r.level==='alto' || r.level==='medio'))
+        .map(r=> `${(r.exe||r.proc||'?')}|${String(r.raddr||'').split(':')[0]}|${r.level}`)
+        .sort();
+      return items.join(';').slice(0,1000);
+    } catch(_){ return ''; }
+  }
   function updateHackAlert(rows){
     try {
       const alert = $('#hackAlert');
       if(!alert) return;
-      const suspicious = Array.isArray(rows) && rows.some(r => r && (r.level==='alto' || r.level==='medio'));
-      alert.classList.toggle('hidden', !suspicious);
+      const suspicious = (Array.isArray(rows) ? rows.filter(r => r && (r.level==='alto' || r.level==='medio')) : []);
+      if(!suspicious.length){ alert.classList.add('hidden'); return; }
+      const sig = hackSig(suspicious);
+      const dismissed = localStorage.getItem('pwHackDismissSig') || '';
+      if(!sig || sig === dismissed){ alert.classList.add('hidden'); return; }
+      if(window._hackModalSigShown !== sig){
+        window._hackModalSigShown = sig;
+        const top = suspicious.slice(0,3).map(r => `• ${sentence(r)}`).join('\n');
+        const extra = suspicious.length > 3 ? `\n…y ${suspicious.length-3} más.` : '';
+        const html = `Se detectaron ${suspicious.length} conexiones para revisar.\n\n${top}${extra}\n\n<button id=\\"hackView\\" class=\\"px-3 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded\\">Ver ahora<\\/button> <button id=\\"hackDismiss\\" class=\\"px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded\\">Resolver<\\/button>`;
+        openModal('Atención de seguridad', html);
+        setTimeout(()=>{
+          const v = document.getElementById('hackView');
+          const d = document.getElementById('hackDismiss');
+          if(v){ v.onclick = ()=>{ try{ document.getElementById('modalClose').click(); }catch(_){ } setTimeout(()=>{ try{ document.getElementById('easyMode').checked = true; }catch(_){ } try{ document.getElementById('topList').scrollIntoView({ behavior: 'smooth' }); }catch(_){ } }, 50); }; }
+          if(d){ d.onclick = ()=>{ try{ localStorage.setItem('pwHackDismissSig', sig); }catch(_){ } try{ document.getElementById('modalClose').click(); }catch(_){ } alert.classList.add('hidden'); }; }
+        }, 0);
+      }
+      alert.dataset.sig = sig;
+      alert.classList.add('hidden');
     } catch(_) { /* noop */ }
   }
   function closeModal(){
@@ -717,7 +818,8 @@
         const why = reasonsShort(r);
         const chips = chipsHtml(r);
         const estado = it.active ? 'activa' : 'no activa';
-        const actions = getCfg().paranoid ? `<div class=\"mt-1 flex gap-2\">\n          <button data-pid=\"${r.pid}\" class=\"act-stop-q px-2 py-1 text-xs bg-yellow-800 hover:bg-yellow-700 rounded\">STOP<\/button>\n          <button data-pid=\"${r.pid}\" class=\"act-kill-q px-2 py-1 text-xs bg-red-800 hover:bg-red-700 rounded\">KILL<\/button>\n        <\/div>` : '';
+        // No mostrar acciones aquí; se ofrecen dentro del modal de "Ver"
+        const actions = '';
         return `
           <div class=\"flex items-start justify-between gap-3 p-3 rounded-md bg-slate-900 ring-1 ring-slate-800\">
             <div>
@@ -746,7 +848,106 @@
           const id = btn.getAttribute('data-id');
           const it = (getReview().items||{})[id];
           const r = (it && it.data) || {};
-          openModal('Detalle de conexión', `Proceso: ${r.proc} (PID ${r.pid})\nUsuario: ${r.user}\nEjecutable: ${r.exe}\nDestino: ${r.raddr}\nPuerto/Servicio: ${r.dport||''} ${r.service||''}\nNivel: ${r.level} • Score: ${(r.score||0).toFixed(2)}\nMotivos: ${(r.reasons||[]).join(', ')}`);
+          const canKill = (r.level === 'medio' || r.level === 'alto');
+          const body = `
+            <div class="space-y-2">
+              <div><b>Proceso:</b> ${r.proc} (PID ${r.pid})</div>
+              <div><b>Usuario:</b> ${r.user}</div>
+              <div><b>Ejecutable:</b> ${r.exe}</div>
+              <div><b>Destino:</b> ${r.raddr}</div>
+              <div><b>Puerto/Servicio:</b> ${r.dport||''} ${r.service||''}</div>
+              <div><b>Nivel:</b> ${r.level} • <b>Score:</b> ${(r.score||0).toFixed(2)}</div>
+              <div><b>Motivos:</b> ${(r.reasons||[]).join(', ')}</div>
+              <div id="modalActions" class="mt-2 space-x-2">
+                ${canKill ? `<button id="killInModal" data-pid="${r.pid}" class="px-3 py-2 bg-red-700 hover:bg-red-600 text-white rounded ring-1 ring-red-900">KILL (SIGKILL)</button>` : ''}
+              </div>
+            </div>`;
+          openModal('Detalle de conexión', body);
+          // Wire botón KILL dentro del modal si aplica
+          setTimeout(()=>{
+            const k = document.getElementById('killInModal');
+            if(k){
+              k.addEventListener('click', async ()=>{
+                const pid = Number(k.getAttribute('data-pid'));
+                if(!pid) return;
+                if(!(await askConfirm(`¿Terminar proceso PID ${pid} (SIGKILL)?`, { okText: 'Sí, terminar', tone: 'danger' }))) return;
+                try{
+                  const res = await fetch(`/api/proc_kill?pid=${pid}`, { method: 'POST' });
+                  const data = await res.json();
+                  if(data && data.ok) toast(`Proceso ${pid} terminado.`, 'success'); else toast(`Error: ${data.error||'fallo'}`, 'error');
+                  closeModal();
+                  load();
+                } catch(_){ toast('Error al terminar proceso', 'error'); }
+              });
+            }
+            // Acciones extra: árbol y bootout
+            const actions = document.getElementById('modalActions');
+            const pid = Number(r.pid);
+            if(actions && pid){
+              fetch(`/api/proc_tree?pid=${r.pid}`).then(res=>res.json()).then(info=>{
+                // Kill árbol solo si hay descendientes
+                const count = Number((info && info.children_count) || 0);
+                if(count > 0){
+                  const bt1 = document.createElement('button');
+                  bt1.id = 'killTreeInModal';
+                  bt1.textContent = `Kill árbol (${count})`;
+                  bt1.className = 'px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded ring-1 ring-slate-800';
+                  actions.appendChild(bt1);
+                  bt1.addEventListener('click', async ()=>{
+                    if(!(await askConfirm(`¿Terminar árbol de procesos de PID ${pid} (descendientes ${count})?`, { okText: 'Sí, terminar', tone: 'danger' }))) return;
+                    try{
+                      const res = await fetch(`/api/proc_kill_tree?pid=${pid}`, { method: 'POST' });
+                      const data = await res.json();
+                      if(data && data.ok) toast(`Árbol terminado (${(data.killed||[]).length} procesos).`, 'success'); else toast(`Error: ${data.error||'fallo'}`, 'error');
+                      closeModal();
+                      load();
+                    } catch(_){ toast('Error al terminar árbol', 'error'); }
+                  });
+                }
+                // Kill grupo (PGID)
+                if(info && info.pgid){
+                  const btg = document.createElement('button');
+                  btg.id = 'killGroupInModal';
+                  btg.textContent = `Kill grupo (pgid ${info.pgid})`;
+                  btg.className = 'px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded ring-1 ring-slate-800';
+                  actions.appendChild(btg);
+                  btg.addEventListener('click', async ()=>{
+                    if(!(await askConfirm(`¿Terminar todo el grupo ${info.pgid}?`, { okText: 'Sí, terminar', tone: 'danger' }))) return;
+                    try{
+                      const res = await fetch(`/api/proc_kill_pgid?pid=${pid}`, { method: 'POST' });
+                      const data = await res.json();
+                      if(data && data.ok) toast(`Grupo ${data.pgid} terminado.`, 'success'); else toast(`Error: ${data.error||'fallo'}`, 'error');
+                      closeModal();
+                      load();
+                    } catch(_){ toast('Error al terminar grupo', 'error'); }
+                  });
+                }
+                // Bootout si hay label
+                if(info && info.launchd && info.launchd.label){
+                  const bt2 = document.createElement('button');
+                  bt2.id = 'bootoutInModal';
+                  bt2.textContent = `Bootout ${info.launchd.label}`;
+                  bt2.className = 'px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded ring-1 ring-slate-800';
+                  actions.appendChild(bt2);
+                  bt2.addEventListener('click', async ()=>{
+                    if(!(await askConfirm(`¿Intentar bootout de ${info.launchd.label}?`, { okText: 'Sí, ejecutar', tone: 'warn' }))) return;
+                    try{
+                      const res = await fetch(`/api/proc_bootout?pid=${pid}`, { method: 'POST' });
+                      const data = await res.json();
+                      if(data.ok){
+                        const lines = (data.results||[]).map(r=>`${r.cmd} (rc=${r.rc})\n${(r.stdout||'').trim()}\n${(r.stderr||'').trim()}`).join('\n\n');
+                        openModal('Resultados bootout', `<pre class=\"mono whitespace-pre-wrap\">${lines.replace(/[&<>]/g,s=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[s]))}</pre>`);
+                      } else {
+                        toast(`Error: ${data.error||'fallo'}`, 'error');
+                      }
+                      closeModal();
+                      load();
+                    } catch(_){ toast('Error al ejecutar bootout', 'error'); }
+                  });
+                }
+              }).catch(()=>{});
+            }
+          }, 0);
         });
       });
       $$('.dismiss', $('#topList')).forEach((btn)=>{
@@ -783,33 +984,7 @@
           sel.value='';
         });
       });
-      // Acciones STOP/KILL en modo simple (si está activo el modo paranoico)
-      $$('.act-stop-q', $('#topList')).forEach(btn=>{
-        btn.addEventListener('click', async ()=>{
-          const pid = Number(btn.getAttribute('data-pid'));
-          if(!pid) return;
-          if(!confirm(`¿Detener proceso PID ${pid} (SIGSTOP)?`)) return;
-          try{
-            const res = await fetch(`/api/proc_stop?pid=${pid}`, { method: 'POST' });
-            const data = await res.json();
-            alert(data.ok? `Proceso ${pid} detenido.` : `Error: ${data.error||'fallo'}`);
-            load();
-          } catch(_){ alert('Error al detener proceso'); }
-        });
-      });
-      $$('.act-kill-q', $('#topList')).forEach(btn=>{
-        btn.addEventListener('click', async ()=>{
-          const pid = Number(btn.getAttribute('data-pid'));
-          if(!pid) return;
-          if(!confirm(`¿Terminar proceso PID ${pid} (SIGKILL)?`)) return;
-          try{
-            const res = await fetch(`/api/proc_kill?pid=${pid}`, { method: 'POST' });
-            const data = await res.json();
-            alert(data.ok? `Proceso ${pid} terminado.` : `Error: ${data.error||'fallo'}`);
-            load();
-          } catch(_){ alert('Error al terminar proceso'); }
-        });
-      });
+      // (Sin acciones directas en la tarjeta; usar el modal)
       // Botón Cerrar (archivar sin perder contador)
       $$('.archive', $('#topList')).forEach((btn)=>{
         btn.addEventListener('click', ()=>{
@@ -941,7 +1116,8 @@
         btn.addEventListener('click', async () => {
           const res = await fetch(`/api/action_plan?pid=${r.pid}&raddr=${encodeURIComponent(r.raddr)}`);
           const data = await res.json();
-          alert(data.plan.join('\n\n'));
+          const html = `<pre class=\"whitespace-pre-wrap\">${(data.plan||[]).join('\n\n').replace(/[&<>]/g,s=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[s]))}</pre>`;
+          openModal('Plan de acción', html);
         });
       });
       // Exportar evidencia por fila
@@ -976,26 +1152,26 @@
         btn.addEventListener('click', async () => {
           const pid = Number(btn.getAttribute('data-pid'));
           if(!pid) return;
-          if(!confirm(`¿Detener proceso PID ${pid} (SIGSTOP)?`)) return;
+          if(!(await askConfirm(`¿Detener proceso PID ${pid} (SIGSTOP)?`, { okText: 'Sí, detener', tone: 'warn' }))) return;
           try{
             const res = await fetch(`/api/proc_stop?pid=${pid}`, { method: 'POST' });
             const data = await res.json();
-            alert(data.ok? `Proceso ${pid} detenido.` : `Error: ${data.error||'fallo'}`);
+            if(data && data.ok) toast(`Proceso ${pid} detenido.`, 'success'); else toast(`Error: ${data.error||'fallo'}`, 'error');
             load();
-          } catch(_){ alert('Error al detener proceso'); }
+          } catch(_){ toast('Error al detener proceso', 'error'); }
         });
       });
       $$('.act-kill', rowsEl).forEach((btn) => {
         btn.addEventListener('click', async () => {
           const pid = Number(btn.getAttribute('data-pid'));
           if(!pid) return;
-          if(!confirm(`¿Terminar proceso PID ${pid} (SIGKILL)?`)) return;
+          if(!(await askConfirm(`¿Terminar proceso PID ${pid} (SIGKILL)?`, { okText: 'Sí, terminar', tone: 'danger' }))) return;
           try{
             const res = await fetch(`/api/proc_kill?pid=${pid}`, { method: 'POST' });
             const data = await res.json();
-            alert(data.ok? `Proceso ${pid} terminado.` : `Error: ${data.error||'fallo'}`);
+            if(data && data.ok) toast(`Proceso ${pid} terminado.`, 'success'); else toast(`Error: ${data.error||'fallo'}`, 'error');
             load();
-          } catch(_){ alert('Error al terminar proceso'); }
+          } catch(_){ toast('Error al terminar proceso', 'error'); }
         });
       });
     }
@@ -1021,6 +1197,17 @@
   }
 
   $('#refresh').addEventListener('click', load);
+  // Resolver alerta de hackeado: oculta hasta que el conjunto de sospechosas cambie
+  const hackResolve = document.getElementById('hackResolve');
+  if(hackResolve){
+    hackResolve.addEventListener('click', ()=>{
+      try{
+        const sig = (document.getElementById('hackAlert')||{}).dataset.sig || '';
+        if(sig){ localStorage.setItem('pwHackDismissSig', sig); }
+        (document.getElementById('hackAlert')||{}).classList.add('hidden');
+      } catch(_){/* noop */}
+    });
+  }
   $('#auto').addEventListener('change', (e)=>{
     clearInterval(timer);
     if(e.target.checked){ timer = setInterval(load, 2000); }
@@ -1035,5 +1222,10 @@
   load();
   if($('#auto').checked){ timer = setInterval(load, 2000); }
   </script>
+  <!-- Tailwind safelist placeholder for dynamically injected elements -->
+  <div class="hidden">
+    <span class="px-3 py-2 bg-red-700 hover:bg-red-600 text-white rounded ring-1 ring-red-900 inline-flex items-center gap-2 ring-offset-1 ring-offset-slate-900">.</span>
+    <span class="px-3 py-2 bg-red-800 hover:bg-red-700 text-white rounded ring-1 ring-red-900">.</span>
+  </div>
 </body>
 </html>
