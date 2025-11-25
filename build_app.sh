@@ -54,10 +54,18 @@ rm -rf frontend/dist/
 echo "✅ Limpieza completa"
 echo ""
 
-# Asegura dependencias
-echo "📦 Instalando dependencias Python..."
+# ========================================
+# PREPARACIÓN DE ENTORNO VIRTUAL
+# ========================================
+echo "🛠️  Creando entorno virtual temporal para el build..."
+VENV_DIR=".build_venv"
+python3 -m venv "${VENV_DIR}"
+source "${VENV_DIR}/bin/activate"
+
+# Asegura dependencias en el venv
+echo "📦 Instalando dependencias en entorno virtual..."
+pip install --upgrade pip
 pip install -r requirements.txt
-# Asegurar que pyinstaller está instalado
 pip install pyinstaller
 
 # Build Frontend
@@ -82,7 +90,8 @@ fi
 
 if [[ "${PLATFORM}" == "mac" ]]; then
   echo "📦 Empaquetando PortWatch.app para macOS..."
-  python3 -m PyInstaller backend/ui/tray_app.py \
+  # Usamos 'pyinstaller' directo del venv
+  pyinstaller backend/ui/tray_app.py \
     --name PortWatch \
     --windowed \
     --add-data "frontend/dist:frontend/dist" \
@@ -102,6 +111,10 @@ if [[ "${PLATFORM}" == "mac" ]]; then
   echo "🧹 Limpiando archivos temporales de build..."
   rm -rf dist/PortWatch build/ PortWatch.spec
   
+  # Limpieza del venv
+  deactivate
+  rm -rf "${VENV_DIR}"
+  
   echo ""
   echo "✅ Build completado exitosamente!"
   echo "📂 Ubicación: dist/PortWatch.app"
@@ -113,7 +126,8 @@ if [[ "${PLATFORM}" == "mac" ]]; then
   echo "✨ PortWatch iniciado. ¡Disfruta!"
 else
   echo "📦 Empaquetando portwatch-tray (Linux)..."
-  python3 -m PyInstaller backend/ui/tray_app.py \
+  # Usamos 'pyinstaller' directo del venv
+  pyinstaller backend/ui/tray_app.py \
     --onefile \
     --name portwatch-tray \
     --add-data "frontend/dist:frontend/dist" \
@@ -130,6 +144,10 @@ else
   # Limpieza de artefactos intermedios
   echo "🧹 Limpiando archivos temporales de build..."
   rm -rf build/ portwatch-tray.spec
+  
+  # Limpieza del venv
+  deactivate
+  rm -rf "${VENV_DIR}"
   
   echo ""
   echo "✅ Build completado exitosamente!"
