@@ -1,95 +1,95 @@
 # PortWatch Tests
 
-Este directorio contiene scripts de prueba, diagnóstico y simulación para PortWatch.
+This directory contains test, diagnostic, and simulation scripts for PortWatch.
 
 ## Quick Start
 
 ```bash
-# Verificar estado del sistema
+# Check system status
 python tests/check_status.py
 
-# Diagnosticar sistema de alertas
+# Diagnose alert system
 python tests/diagnose_alerts.py
 
-# Test de GeoIP
+# GeoIP Test
 python tests/test_geoip.py
 ```
 
-## Tests Funcionales
+## Functional Tests
 
 ### `test_alert_mode.py`
-Prueba el sistema de alertas interactivas.
+Tests the interactive alert system.
 ```bash
 python tests/test_alert_mode.py
 ```
 
 ### `test_alert_integration.sh`
-Test de integración completo del sistema de alertas.
+Full integration test of the alert system.
 ```bash
 bash tests/test_alert_integration.sh
 ```
 
 ### `test_strict_alerting.py`
-Verifica el modo de alerta estricto.
+Verifies strict alert mode.
 ```bash
 python tests/test_strict_alerting.py
 ```
 
 ### `test_rule_persistence.py`
-Verifica la persistencia de reglas de firewall en SQLite.
+Verifies firewall rule persistence in SQLite.
 ```bash
 python tests/test_rule_persistence.py
 ```
 
 ### `test_resource_alert.py`
-Prueba alertas basadas en uso de recursos (CPU, RAM, disco).
+Tests alerts based on resource usage (CPU, RAM, disk).
 ```bash
 python tests/test_resource_alert.py
 ```
 
 ### `test_geoip.py`
-Verifica funcionalidad de geolocalización de IPs.
+Verifies IP geolocation functionality.
 ```bash
 python tests/test_geoip.py
 ```
 
 ### `test_notifications.py`
-Prueba el sistema de notificaciones nativas de macOS.
+Tests the native macOS notification system.
 ```bash
 python tests/test_notifications.py
 ```
 
 ### `test_icons.py`
-Verifica renderizado de iconos en la aplicación.
+Verifies icon rendering in the application.
 ```bash
 python tests/test_icons.py
 ```
 
 ### `test_tray_setup.py`
-Prueba inicialización del icono de bandeja del sistema.
+Tests system tray icon initialization.
 ```bash
 python tests/test_tray_setup.py
 ```
 
 ### `test_dynamic_port.sh`
-Prueba asignación dinámica de puertos del servidor.
+Tests server dynamic port assignment.
 ```bash
 bash tests/test_dynamic_port.sh
 ```
 
-## Simulación y Verificación
+## Simulation and Verification
 
 ### `simulate_ransomware.py`
-Simula comportamiento de ransomware para testing.
+Simulates ransomware behavior for testing.
 
-⚠️ **ADVERTENCIA:** Crea un archivo grande (`ransomware_sim.tmp`) y consume recursos. Solo para pruebas.
+**WARNING:** Creates a large file (`ransomware_sim.tmp`) and consumes resources. For testing only.
 
 ```bash
 python tests/simulate_ransomware.py
 ```
 
 ### `verify_ransomware_detection.py`
-Verifica detección de comportamiento de ransomware.
+Verifies ransomware behavior detection.
 ```bash
 # Terminal 1:
 python tests/simulate_ransomware.py
@@ -99,57 +99,57 @@ python tests/verify_ransomware_detection.py
 ```
 
 ### `demo_alerts.py`
-Demostración interactiva del sistema de alertas.
+Interactive demonstration of the alert system.
 ```bash
 python tests/demo_alerts.py
 ```
 
 ### `trigger_alert.py`
-Dispara una alerta de prueba simple.
+Triggers a simple test alert.
 ```bash
 python tests/trigger_alert.py
 ```
 
-## Utilidades de Diagnóstico
+## Diagnostic Utilities
 
 ### `check_status.py`
-Muestra estado general de PortWatch (servidor, configuración, procesos).
+Shows general PortWatch status (server, configuration, processes).
 ```bash
 python tests/check_status.py
 ```
 
 ### `diagnose_alerts.py`
-Diagnóstico comprehensivo del sistema de alertas (configuración, permisos, estado).
+Comprehensive diagnosis of the alert system (configuration, permissions, status).
 ```bash
 python tests/diagnose_alerts.py
 ```
 
 ### `clear_alert_cache.py`
-Limpia el caché de alertas vistas (útil durante desarrollo).
+Clears the seen alerts cache (useful during development).
 ```bash
 python tests/clear_alert_cache.py
 ```
 
-## Workflow de Testing Recomendado
+## Recommended Testing Workflow
 
-1. **Estado General:** `check_status.py` - Verificar estado del sistema
-2. **Alertas Básicas:** `test_alert_mode.py` - Sistema de alertas
-3. **Recursos:** `test_resource_alert.py` - Monitoreo de recursos
-4. **Ransomware:** `simulate_ransomware.py` + `verify_ransomware_detection.py` - Heurísticas
-5. **Integración:** `test_alert_integration.sh` - Prueba end-to-end completa
+1. **General Status:** `check_status.py` - Verify system status
+2. **Basic Alerts:** `test_alert_mode.py` - Alert system
+3. **Resources:** `test_resource_alert.py` - Resource monitoring
+4. **Ransomware:** `simulate_ransomware.py` + `verify_ransomware_detection.py` - Heuristics
+5. **Integration:** `test_alert_integration.sh` - Full end-to-end test
 
-## Notas Importantes
+## Important Notes
 
-- **Permisos:** Algunos tests requieren permisos especiales en macOS (notificaciones, red)
-- **Entorno:** Ejecutar desde el directorio raíz del proyecto
-- **Python:** Requiere Python 3.11+
-- **Dependencias:** Activar venv e instalar dependencias antes de ejecutar tests
+- **Permissions:** Some tests require special permissions on macOS (notifications, network)
+- **Environment:** Run from the project root directory
+- **Python:** Requires Python 3.11+
+- **Dependencies:** Activate venv and install dependencies before running tests
 
 ## Troubleshooting
 
-Si encuentras problemas:
+If you encounter issues:
 
-1. Verifica que el servidor esté corriendo
-2. Verifica permisos de notificaciones en Preferencias del Sistema → Notificaciones
-3. Revisa los logs del servidor
-4. Ejecuta `diagnose_alerts.py` para un diagnóstico completo
+1. Verify the server is running
+2. Check notification permissions in System Preferences -> Notifications
+3. Check server logs
+4. Run `diagnose_alerts.py` for a full diagnosis

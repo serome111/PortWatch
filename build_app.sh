@@ -64,7 +64,7 @@ pip install pyinstaller
 echo "Construyendo frontend..."
 cd frontend
 if [[ ! -d "node_modules" ]]; then
-  npm install
+  npm install --legacy-peer-deps
 fi
 npm run build
 cd ..
